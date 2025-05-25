@@ -1,0 +1,3 @@
+streamlit==1.45.1
+extract-msg==<version_you_used>
+# Add any other direct dependencies your core logic might have
