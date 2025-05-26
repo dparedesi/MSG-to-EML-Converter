@@ -1,4 +1,4 @@
-('/Users/udparede/Documents/Scripts/MSGtoEMLConverter/build/MSGtoEMLConverter/PYZ-00.pyz',
+('/Users/udparede/Documents/GitHub/MSG-to-EML-Converter/build/MSGtoEMLConverter/PYZ-00.pyz',
  [('PIL',
    '/opt/homebrew/lib/python3.11/site-packages/PIL/__init__.py',
    'PYMODULE'),
