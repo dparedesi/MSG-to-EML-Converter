@@ -1,122 +1,136 @@
-# MSG to EML Converter ✉️✨
+# MSG to EML Converter ✉️
 
-A powerful local utility to convert Microsoft Outlook `.msg` files into standard `.eml` files. This tool intelligently handles nested `.msg` attachments, converting them and embedding them as `message/rfc822` parts within the main EML. This means you can view the entire email chain, including original attachments, in most modern email clients that support this standard.
-
-The application provides a user-friendly interface built with Streamlit and can be packaged into a standalone executable for easy distribution.
+A modern web application to convert Microsoft Outlook `.msg` files into standard `.eml` files. Built with Next.js, TypeScript, and Tailwind CSS for seamless deployment on Vercel.
 
 ## Features
 
-*   **MSG to EML Conversion:** Converts the main `.msg` file to a fully compliant `.eml` file.
-*   **Nested MSG Handling:** Recursively processes `.msg` files attached within other `.msg` files.
-*   **Embedded EMLs:** Converts nested `.msg` attachments into `.eml` format and embeds them as `message/rfc822` MIME parts in the parent EML. This allows them to be viewed inline or as attached EMLs in compatible email clients.
-*   **Preserves Standard Attachments:** Regular file attachments (non-MSG) are preserved in the final EML.
-*   **User-Friendly Interface:** A simple web-based UI powered by Streamlit for easy file uploading and conversion.
-*   **Local & Offline:** Runs entirely on your local machine. No internet connection or external servers required after setup/packaging.
-*   **Standalone Executable:** Can be packaged into a single executable for colleagues who don't have Python installed.
+- **🔄 MSG to EML Conversion**: Convert Outlook `.msg` files to standard `.eml` format
+- **📎 Nested Attachments**: Handles nested `.msg` attachments recursively
+- **🎨 Modern UI**: Clean, responsive interface with drag-and-drop support
+- **⚡ Client-Side Processing**: All processing happens in the browser - no server required
+- **📱 Responsive Design**: Works perfectly on desktop and mobile devices
+- **🚀 Vercel Ready**: Optimized for deployment on Vercel platform
 
-## How to Use (Packaged Application)
+## How It Works
 
-This is the recommended way for most users.
+1. **Upload**: Drag and drop or browse for your `.msg` file
+2. **Convert**: The app processes the file client-side using JavaScript libraries
+3. **Download**: Get your converted `.eml` file instantly
 
-1.  **Download:** Obtain the `MSGtoEMLConverter` executable (e.g., `MSGtoEMLConverter.exe` on Windows or `MSGtoEMLConverter` on macOS/Linux) from the `dist` folder.
-2.  **Run:** Double-click the executable.
-    *   A terminal window will open (this shows server logs; you can usually minimize it).
-    *   Your default web browser should automatically open to the application's interface (usually `http://localhost:8501`). If it doesn't, manually open your browser and navigate to that URL.
-3.  **Upload:** Use the file uploader in the web interface to select the `.msg` file you want to convert.
-4.  **Convert:** Click the "Convert" button.
-5.  **Download:** Once the conversion is complete, a download button will appear for your new `.eml` file. The logs on the page will show the conversion progress.
-6.  **Close:** To stop the application, simply close the terminal window that opened when you launched the executable.
+## Tech Stack
 
-## How to Run (From Source - For Developers)
+- **Frontend**: Next.js 15 with App Router
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **Icons**: Lucide React
+- **MSG Parsing**: @kenjiuno/msgreader
+- **EML Generation**: emailjs-mime-builder
+- **File Handling**: file-saver
 
-If you have Python and want to run the application directly from the source code:
+## Development
 
-1.  **Prerequisites:**
-    *   Python 3.8 or higher.
-    *   `pip` (Python package installer).
+### Prerequisites
 
-2.  **Clone the Repository (if applicable) or Download Files:**
-    Ensure you have `app.py`, `msg_converter_core.py`, and `run_app_launcher.py`.
+- Node.js 18 or higher
+- npm or yarn
 
-3.  **Create a Virtual Environment (Recommended):**
-    ```bash
-    python -m venv venv
-    # On Windows
-    venv\Scripts\activate
-    # On macOS/Linux
-    source venv/bin/activate
-    ```
+### Installation
 
-4.  **Install Dependencies:**
-    If a `requirements.txt` file is provided:
-    ```bash
-    pip install -r requirements.txt
-    ```
-    Otherwise, install manually:
-    ```bash
-    pip install streamlit extract-msg
-    # (Ensure extract-msg version matches what was used, e.g., extract-msg==0.41.2)
-    ```
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd MSG-to-EML-Converter
 
-5.  **Run the Streamlit Application:**
-    Navigate to the project directory in your terminal and run:
-    ```bash
-    streamlit run app.py
-    ```
-    This will start the Streamlit development server, and your browser should open to the application.
+# Install dependencies
+npm install
 
-## Building the Executable (For Developers)
+# Run development server
+npm run dev
+```
 
-To package the application into a standalone executable using PyInstaller:
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-1.  **Install PyInstaller:**
-    ```bash
-    pip install pyinstaller
-    ```
+### Build for Production
 
-2.  **Navigate to Project Directory:**
-    Open your terminal in the root directory of the project (where `run_app_launcher.py`, `app.py`, and `msg_converter_core.py` are located).
+```bash
+# Build the application
+npm run build
 
-3.  **Create/Update the `.spec` File:**
-    A `MSGtoEMLConverter.spec` file is used to configure the PyInstaller build. If one isn't provided, you can generate a basic one and then modify it:
-    ```bash
-    pyi-makespec --name MSGtoEMLConverter run_app_launcher.py
-    ```
-    Then, edit `MSGtoEMLConverter.spec` to include necessary `datas` (like `app.py`, `msg_converter_core.py`), `hiddenimports` (for Streamlit, extract-msg, and their dependencies), and potentially hooks for Streamlit if UI elements are missing. Refer to the comments within a provided `.spec` file for guidance.
+# Start production server
+npm start
+```
 
-    **Example `hiddenimports` that might be needed:**
-    ```python
-    hiddenimports=[
-        'streamlit.web.server.server', 'altair', 'pandas', 'pyarrow', 'watchdog',
-        'extract_msg', 'extract_msg.utils', 'extract_msg.msg_classes',
-        'email.mime', 'email.header', 'email.encoders', 'email.utils',
-        'chardet', 'olefile', 'compressed_rtf',
-        # Add any other modules your application or its dependencies might use implicitly.
-    ]
-    ```
+## Deployment on Vercel
 
-4.  **Build the Executable:**
-    ```bash
-    pyinstaller MSGtoEMLConverter.spec
-    ```
-    This command will create a `build` folder and a `dist` folder. The executable will be inside `dist/MSGtoEMLConverter`.
+1. **Push to GitHub**: Push your code to a GitHub repository
 
-5.  **Test:** Run the executable from the `dist` folder.
+2. **Connect to Vercel**: 
+   - Go to [vercel.com](https://vercel.com)
+   - Import your GitHub repository
+   - Vercel will automatically detect it's a Next.js project
 
-## Troubleshooting Packaged App
+3. **Deploy**: 
+   - Vercel will build and deploy automatically
+   - Your app will be available at `https://your-app-name.vercel.app`
 
-*   **UI Looks Plain/Broken:** This often means Streamlit's static assets (CSS, JavaScript) were not bundled correctly. You may need to:
-    *   Ensure PyInstaller hooks for Streamlit are active (e.g., by installing `pyinstaller-hooks-contrib` if it has a Streamlit hook).
-    *   Manually add Streamlit's `static` directory to the `datas` section in your `.spec` file using `Tree()`. Example: `a.datas += Tree('/path/to/streamlit/static', prefix='streamlit/static')` (adjust the source path).
-*   **`ModuleNotFoundError` on Launch:** A required module was not included. Add it to the `hiddenimports` list in the `.spec` file and rebuild.
-*   **`FileNotFoundError: streamlit` (from launcher):** PyInstaller might not have found or correctly bundled the `streamlit` command-line entry point. Ensure `streamlit` is installed in the environment PyInstaller is using. Sometimes, specifying the full path to the bundled Python interpreter for the `streamlit` command can help: `cmd = [sys.executable, "-m", "streamlit", "run", ...]`.
-*   **Large Executable Size:** PyInstaller bundles a Python interpreter and dependencies. Using UPX (enabled by `upx=True` in the `.spec` file) can help compress the executable, but it can also make the build process slower or occasionally cause issues with antivirus software.
+### Environment Configuration
 
-## Dependencies
+No environment variables are required as this is a client-side only application.
 
-*   **Python 3.8+**
-*   **extract-msg:** For parsing `.msg` files.
-*   **Streamlit:** For the web-based user interface.
+## Browser Compatibility
 
-(See `requirements.txt` if provided for specific versions).
+- Chrome 88+
+- Firefox 85+
+- Safari 14+
+- Edge 88+
 
+## File Size Limits
+
+The application can handle MSG files up to the browser's memory limit (typically several hundred MB for modern browsers).
+
+## Security
+
+- All processing happens client-side
+- No files are uploaded to servers
+- No data is stored or transmitted
+
+## Supported Features
+
+### MSG File Support
+- ✅ Subject, From, To, CC headers
+- ✅ Plain text and HTML body content
+- ✅ File attachments
+- ✅ Nested MSG attachments (recursive conversion)
+- ✅ Date/time information
+- ✅ Message IDs
+
+### EML Output
+- ✅ RFC 2822 compliant format
+- ✅ Proper MIME structure
+- ✅ Embedded attachments as message/rfc822
+- ✅ Base64 encoding for binary attachments
+
+## Known Limitations
+
+- Very large files (>100MB) may cause browser memory issues
+- Some advanced Outlook-specific features may not be preserved
+- Requires modern browser with File API support
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Built with [Next.js](https://nextjs.org/)
+- MSG parsing by [@kenjiuno/msgreader](https://www.npmjs.com/package/@kenjiuno/msgreader)
+- EML generation by [emailjs-mime-builder](https://www.npmjs.com/package/emailjs-mime-builder)
+- Icons by [Lucide](https://lucide.dev/)
