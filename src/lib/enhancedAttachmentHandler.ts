@@ -1,6 +1,29 @@
 import MsgReader from '@kenjiuno/msgreader';
 import MimeBuilder from 'emailjs-mime-builder';
 
+interface MSGAttachment {
+  name?: string;
+  longFilename?: string;
+  shortFilename?: string;
+  filename?: string;
+  contentType?: string;
+  data?: Uint8Array | ArrayBuffer | string | Buffer;
+  dataId?: string | number;
+  contentId?: string;
+  pidContentId?: string;
+  isEmbedded?: boolean;
+  attachmentHidden?: boolean;
+  msg?: unknown;
+  innerMsgContentFields?: unknown;
+  getAttachment?: () => Uint8Array | ArrayBuffer;
+  [key: string]: unknown;
+}
+
+interface MSGReader {
+  getFileData(): unknown;
+  getAttachment(dataId: string | number): Uint8Array | ArrayBuffer | null;
+}
+
 export interface AttachmentInfo {
   name: string;
   contentType: string;
@@ -8,7 +31,7 @@ export interface AttachmentInfo {
   isEmbedded: boolean;
   contentId?: string;
   isNestedMsg: boolean;
-  nestedMsgData?: any;
+  nestedMsgData?: unknown;
 }
 
 export interface AttachmentExtractionResult {
@@ -85,7 +108,7 @@ export class EnhancedAttachmentHandler {
     return mimeTypes[ext || ''] || 'application/octet-stream';
   }
 
-  private extractAttachmentData(attachment: any, msgReader?: any): Uint8Array | null {
+  private extractAttachmentData(attachment: MSGAttachment, msgReader?: MSGReader): Uint8Array | null {
     // First try to get data using msgReader.getAttachment(dataId) for regular attachments
     if (attachment.dataId && msgReader) {
       try {
@@ -149,32 +172,34 @@ export class EnhancedAttachmentHandler {
     return null;
   }
 
-  private async tryParseAsNestedMsg(data: Uint8Array): Promise<any | null> {
+  private async tryParseAsNestedMsg(data: Uint8Array): Promise<unknown> {
     try {
       const msgReader = new MsgReader(data.buffer as ArrayBuffer);
       const nestedMsgData = msgReader.getFileData();
       return nestedMsgData;
     } catch (error) {
       this.log(`Failed to parse data as nested MSG: ${error}`);
-      return null;
+      return undefined;
     }
   }
 
-  public async extractAttachments(msgData: any, msgReader?: any): Promise<AttachmentExtractionResult> {
+  public async extractAttachments(msgData: unknown, msgReader?: unknown): Promise<AttachmentExtractionResult> {
     this.logs = [];
     this.errors = [];
     
     const attachments: AttachmentInfo[] = [];
 
-    if (!msgData.attachments || !Array.isArray(msgData.attachments)) {
+    // Type guard to check if msgData has attachments
+    const typedMsgData = msgData as { attachments?: unknown[] };
+    if (!typedMsgData.attachments || !Array.isArray(typedMsgData.attachments)) {
       this.log('No attachments found in MSG data');
       return { attachments, logs: this.logs, errors: this.errors };
     }
 
-    this.log(`Processing ${msgData.attachments.length} attachments`);
+    this.log(`Processing ${typedMsgData.attachments.length} attachments`);
 
-    for (let i = 0; i < msgData.attachments.length; i++) {
-      const attachment = msgData.attachments[i];
+    for (let i = 0; i < typedMsgData.attachments.length; i++) {
+      const attachment = typedMsgData.attachments[i] as MSGAttachment;
       this.log(`\n--- Processing Attachment ${i + 1} ---`);
 
       try {
@@ -215,7 +240,7 @@ export class EnhancedAttachmentHandler {
         }
 
         // Extract attachment data
-        const data = this.extractAttachmentData(attachment, msgReader);
+        const data = this.extractAttachmentData(attachment, msgReader as MSGReader);
         
         if (!data || data.length === 0) {
           this.log(`⚠️  No data found for attachment: ${filename}`, true);
@@ -225,7 +250,9 @@ export class EnhancedAttachmentHandler {
         this.log(`✓ Extracted ${data.length} bytes of data`);
 
         // Determine content type
-        let contentType = attachment.contentType || attachment.attachMimeTag || this.guessMimeType(filename);
+        let contentType = attachment.contentType || 
+                         (typeof attachment.attachMimeTag === 'string' ? attachment.attachMimeTag : '') || 
+                         this.guessMimeType(filename);
         
         // Check if this might be a nested MSG file by extension or content
         const isLikelyMsg = filename.toLowerCase().endsWith('.msg') ||
@@ -271,13 +298,13 @@ export class EnhancedAttachmentHandler {
       }
     }
 
-    this.log(`\n✅ Successfully processed ${attachments.length} out of ${msgData.attachments.length} attachments`);
+    this.log(`\n✅ Successfully processed ${attachments.length} out of ${typedMsgData.attachments.length} attachments`);
     
     return { attachments, logs: this.logs, errors: this.errors };
   }
 
   public async buildAttachmentsForEML(attachmentInfos: AttachmentInfo[], parentBuilder: MimeBuilder, 
-                               emlBuilderFunction: (msgData: any) => Promise<MimeBuilder>): Promise<void> {
+                               emlBuilderFunction: (msgData: unknown) => Promise<MimeBuilder>): Promise<void> {
     
     for (let index = 0; index < attachmentInfos.length; index++) {
       const attachmentInfo = attachmentInfos[index];

@@ -1,6 +1,6 @@
 import MsgReader from '@kenjiuno/msgreader';
 import MimeBuilder from 'emailjs-mime-builder';
-import { EnhancedAttachmentHandler, AttachmentInfo } from './enhancedAttachmentHandler';
+import { EnhancedAttachmentHandler } from './enhancedAttachmentHandler';
 
 export interface ConversionLog {
   message: string;
@@ -255,7 +255,7 @@ export class MSGToEMLConverter {
     return { toAddresses, ccAddresses, bccAddresses };
   }
 
-  private async buildEMLFromMSG(msgData: MSGData, nestingLevel: number = 0, msgReader?: any): Promise<MimeBuilder> {
+  private async buildEMLFromMSG(msgData: MSGData, nestingLevel: number = 0, msgReader?: unknown): Promise<MimeBuilder> {
     const subject = msgData.subject || 'No Subject';
     this.log(`${'  '.repeat(nestingLevel)}Processing MSG (Subject: '${subject}')`);
 
@@ -362,7 +362,7 @@ export class MSGToEMLConverter {
       await enhancedHandler.buildAttachmentsForEML(
         attachmentResult.attachments, 
         rootBuilder, 
-        async (nestedMsgData) => await this.buildEMLFromMSG(nestedMsgData, nestingLevel + 1)
+        async (nestedMsgData) => await this.buildEMLFromMSG(nestedMsgData as MSGData, nestingLevel + 1)
       );
       
       // Log additional attachment handler results
