@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { Upload, Download, FileText, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
-import { MSGToEMLConverterDebug as MSGToEMLConverter, ConversionResult, ConversionLog } from '@/lib/msgConverterDebug';
+import { MSGToEMLConverter, ConversionResult, ConversionLog } from '@/lib/msgConverter';
 import { saveAs } from 'file-saver';
 
 export default function Home() {

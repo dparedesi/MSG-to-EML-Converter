@@ -108,67 +108,242 @@ export class EnhancedAttachmentHandler {
     return mimeTypes[ext || ''] || 'application/octet-stream';
   }
 
+  private rawMsgBuffer?: Uint8Array;
+
+  public setRawMsgBuffer(buffer: Uint8Array) {
+    this.rawMsgBuffer = buffer;
+  }
+
+  private extractAttachmentFromRawBuffer(attachment: MSGAttachment): Uint8Array | null {
+    if (!this.rawMsgBuffer || !attachment.name || typeof attachment.contentLength !== 'number') {
+      return null;
+    }
+
+    this.log(`🔍 Raw binary search for: ${attachment.name}`);
+    
+    try {
+      // Convert to Buffer for easier searching
+      const msgBuffer = Buffer.from(this.rawMsgBuffer);
+      const attachmentName = attachment.name;
+      const expectedSize = attachment.contentLength as number;
+      
+      // Search for attachment name in the MSG file
+      let nameIndex = -1;
+      let nameBufferLength = 0;
+      
+      // Try UTF-8 encoding first
+      const nameBufferUtf8 = Buffer.from(attachmentName, 'utf8');
+      nameIndex = msgBuffer.indexOf(nameBufferUtf8);
+      if (nameIndex !== -1) {
+        nameBufferLength = nameBufferUtf8.length;
+      } else {
+        // Try UTF-16LE encoding
+        const nameBufferUtf16 = Buffer.from(attachmentName, 'utf16le');
+        nameIndex = msgBuffer.indexOf(nameBufferUtf16);
+        if (nameIndex !== -1) {
+          nameBufferLength = nameBufferUtf16.length;
+        }
+      }
+      
+      if (nameIndex === -1) {
+        this.log(`❌ Could not find attachment name in MSG buffer`);
+        return null;
+      }
+      
+      this.log(`📍 Found attachment name at offset: ${nameIndex}`);
+      
+      // Define file signatures to look for
+      const fileSignatures: Record<string, Buffer> = {
+        'png': Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+        'jpg': Buffer.from([0xFF, 0xD8, 0xFF]),
+        'jpeg': Buffer.from([0xFF, 0xD8, 0xFF]),
+        'pdf': Buffer.from([0x25, 0x50, 0x44, 0x46]),
+        'zip': Buffer.from([0x50, 0x4B, 0x03, 0x04]),
+        'docx': Buffer.from([0x50, 0x4B, 0x03, 0x04]),
+        'xlsx': Buffer.from([0x50, 0x4B, 0x03, 0x04]),
+        'pptx': Buffer.from([0x50, 0x4B, 0x03, 0x04])
+      };
+      
+      // Determine which signature to look for
+      const fileExt = attachmentName.toLowerCase().split('.').pop() || '';
+      const signature = fileSignatures[fileExt];
+      
+      if (!signature) {
+        this.log(`⚠️ Unknown file type: ${fileExt}, trying generic approach`);
+        return null;
+      }
+      
+      this.log(`🔍 Looking for ${fileExt.toUpperCase()} signature: ${Array.from(signature).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+      
+      // Search for the file signature near the attachment name
+      // Try multiple locations around the name reference
+      const searchRanges = [
+        { start: Math.max(0, nameIndex - 10000), end: Math.min(msgBuffer.length, nameIndex + 50000) },
+        { start: Math.max(0, nameIndex + nameBufferLength), end: Math.min(msgBuffer.length, nameIndex + nameBufferLength + 100000) }
+      ];
+      
+      for (const range of searchRanges) {
+        const searchBuffer = msgBuffer.slice(range.start, range.end);
+        let sigIndex = searchBuffer.indexOf(signature);
+        
+        while (sigIndex !== -1) {
+          const absoluteOffset = range.start + sigIndex;
+          this.log(`🎯 Found ${fileExt.toUpperCase()} signature at offset: ${absoluteOffset}`);
+          
+          // Extract data of expected size starting from signature
+          const candidateData = msgBuffer.slice(absoluteOffset, absoluteOffset + expectedSize);
+          
+          if (candidateData.length === expectedSize) {
+            // Verify this is likely the correct file by checking if it ends properly
+            let isValidFile = true;
+            
+            // Additional validation for specific file types
+            if (fileExt === 'png') {
+              // PNG files should end with IEND chunk
+              const iendSignature = Buffer.from([0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]);
+              const lastBytes = candidateData.slice(-8);
+              isValidFile = lastBytes.equals(iendSignature);
+              if (!isValidFile) {
+                // Try looking for IEND anywhere in the last 50 bytes
+                const searchArea = candidateData.slice(-50);
+                isValidFile = searchArea.indexOf(iendSignature) !== -1;
+              }
+            } else if (fileExt === 'docx' || fileExt === 'xlsx' || fileExt === 'pptx') {
+              // ZIP files should have proper structure
+              isValidFile = candidateData.length > 100; // Basic size check
+            }
+            
+            if (isValidFile) {
+              this.log(`✅ Successfully extracted ${expectedSize} bytes for ${attachmentName}`);
+              return new Uint8Array(candidateData);
+            } else {
+              this.log(`⚠️ File validation failed, continuing search...`);
+            }
+          } else {
+            this.log(`⚠️ Size mismatch: found ${candidateData.length}, expected ${expectedSize}`);
+          }
+          
+          // Look for next occurrence
+          sigIndex = searchBuffer.indexOf(signature, sigIndex + 1);
+        }
+      }
+      
+      this.log(`❌ Could not locate valid ${fileExt} data in MSG buffer`);
+      return null;
+      
+    } catch (error) {
+      this.log(`❌ Raw buffer extraction failed: ${error}`, true);
+      return null;
+    }
+  }
+
   private extractAttachmentData(attachment: MSGAttachment, msgReader?: MSGReader): Uint8Array | null {
-    // First try to get data using msgReader.getAttachment(dataId) for regular attachments
+    // CRITICAL WORKAROUND: @kenjiuno/msgreader has systemic bugs across versions where 
+    // getAttachment(dataId) fails and attachment binary data is completely missing from 
+    // all internal data structures. We implement multiple fallback strategies:
+    
+    this.log(`Attempting to extract attachment data for: ${attachment.name || 'unnamed'}`);
+    this.log(`Expected size: ${attachment.contentLength || 'unknown'} bytes`);
+
+    // Strategy 1: Try standard msgReader.getAttachment (expected to fail due to library bugs)
     if (attachment.dataId && msgReader) {
       try {
         const attachmentData = msgReader.getAttachment(attachment.dataId);
-        if (attachmentData) {
-          if (attachmentData instanceof Uint8Array) {
-            return attachmentData;
-          } else if (attachmentData instanceof ArrayBuffer) {
-            return new Uint8Array(attachmentData);
-          } else if (Buffer.isBuffer && Buffer.isBuffer(attachmentData)) {
-            return new Uint8Array(attachmentData);
+        if (attachmentData && (attachmentData instanceof Uint8Array || attachmentData instanceof ArrayBuffer || (Buffer.isBuffer && Buffer.isBuffer(attachmentData)))) {
+          const data = attachmentData instanceof Uint8Array ? attachmentData : 
+                      attachmentData instanceof ArrayBuffer ? new Uint8Array(attachmentData) :
+                      new Uint8Array(attachmentData);
+          if (data.length > 0) {
+            this.log(`✅ Extracted via msgReader.getAttachment(): ${data.length} bytes`);
+            return data;
           }
         }
       } catch (error) {
-        this.log(`Failed to get attachment data via msgReader.getAttachment(${attachment.dataId}): ${error}`, true);
+        this.log(`❌ msgReader.getAttachment(${attachment.dataId}) failed: ${error}`, true);
       }
     }
 
-    // Try multiple ways to get attachment data
-    const possibleDataFields = ['data', 'content', 'body', 'dataBody', 'attachData', 'innerMsgContent'];
-    
-    for (const field of possibleDataFields) {
-      if (attachment[field]) {
-        const data = attachment[field];
-        
-        if (data instanceof Uint8Array) {
-          return data;
-        } else if (data instanceof ArrayBuffer) {
-          return new Uint8Array(data);
-        } else if (Buffer.isBuffer && Buffer.isBuffer(data)) {
-          return new Uint8Array(data);
-        } else if (typeof data === 'string') {
-          // Handle base64 encoded data
-          try {
-            const binaryString = atob(data);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
+    // Strategy 2: Check msgReader's internal data structures
+    if (attachment.dataId && msgReader && (msgReader as unknown as { fieldsData?: Record<string, unknown> }).fieldsData) {
+      const fieldsData = (msgReader as unknown as { fieldsData: Record<string, unknown> }).fieldsData;
+      
+      // Try direct access
+      if (fieldsData[attachment.dataId]) {
+        const data = fieldsData[attachment.dataId];
+        if (data instanceof Uint8Array || data instanceof ArrayBuffer || (Buffer.isBuffer && Buffer.isBuffer(data))) {
+          const extractedData = data instanceof Uint8Array ? data : 
+                               data instanceof ArrayBuffer ? new Uint8Array(data) :
+                               new Uint8Array(data);
+          if (extractedData.length > 0) {
+            this.log(`✅ Extracted via fieldsData[${attachment.dataId}]: ${extractedData.length} bytes`);
+            return extractedData;
+          }
+        }
+      }
+      
+      // Try nearby keys (library might use different IDs)
+      const allKeys = Object.keys(fieldsData).map(k => parseInt(k)).filter(k => !isNaN(k));
+      const dataIdNum = typeof attachment.dataId === 'number' ? attachment.dataId : parseInt(String(attachment.dataId));
+      
+      if (!isNaN(dataIdNum)) {
+        const nearbyKeys = allKeys.filter(k => Math.abs(k - dataIdNum) < 50);
+        for (const key of nearbyKeys) {
+          const data = fieldsData[key];
+          if (data && (data instanceof Uint8Array || data instanceof ArrayBuffer || (Buffer.isBuffer && Buffer.isBuffer(data)))) {
+            const dataSize = data instanceof ArrayBuffer ? data.byteLength : data.length;
+            if (dataSize === attachment.contentLength) {
+              const extractedData = data instanceof Uint8Array ? data : 
+                                  data instanceof ArrayBuffer ? new Uint8Array(data) :
+                                  new Uint8Array(data);
+              this.log(`✅ Found matching data at fieldsData[${key}]: ${extractedData.length} bytes`);
+              return extractedData;
             }
-            return bytes;
-          } catch {
-            // If not base64, treat as text
-            return new TextEncoder().encode(data);
           }
         }
       }
     }
 
-    // Try to access data through getAttachment method if available
+    // Strategy 3: Check attachment object properties
+    const possibleDataFields = ['data', 'content', 'body', 'dataBody', 'attachData', 'innerMsgContent', 'attachmentData'];
+    for (const field of possibleDataFields) {
+      const data = attachment[field];
+      if (data && (data instanceof Uint8Array || data instanceof ArrayBuffer || (Buffer.isBuffer && Buffer.isBuffer(data)))) {
+        const extractedData = data instanceof Uint8Array ? data : 
+                             data instanceof ArrayBuffer ? new Uint8Array(data) :
+                             new Uint8Array(data);
+        if (extractedData.length > 0) {
+          this.log(`✅ Found data in attachment.${field}: ${extractedData.length} bytes`);
+          return extractedData;
+        }
+      }
+    }
+
+    // Strategy 4: Try attachment's getAttachment method
     if (typeof attachment.getAttachment === 'function') {
       try {
         const attachmentData = attachment.getAttachment();
         if (attachmentData && (attachmentData instanceof Uint8Array || attachmentData instanceof ArrayBuffer)) {
-          return attachmentData instanceof Uint8Array ? attachmentData : new Uint8Array(attachmentData);
+          const data = attachmentData instanceof Uint8Array ? attachmentData : new Uint8Array(attachmentData);
+          if (data.length > 0) {
+            this.log(`✅ Extracted via attachment.getAttachment(): ${data.length} bytes`);
+            return data;
+          }
         }
       } catch (error) {
-        this.log(`Failed to get attachment via getAttachment(): ${error}`, true);
+        this.log(`❌ attachment.getAttachment() failed: ${error}`, true);
       }
     }
 
+    // Strategy 5: ULTIMATE FALLBACK - Raw binary search in MSG buffer
+    // This bypasses the broken library completely and searches for attachment data directly
+    this.log(`🚨 All standard methods failed, attempting raw binary extraction...`);
+    const rawExtractedData = this.extractAttachmentFromRawBuffer(attachment);
+    if (rawExtractedData) {
+      return rawExtractedData;
+    }
+
+    this.log(`❌ COMPLETE FAILURE: Could not extract attachment data for: ${attachment.name || 'unnamed'}`, true);
+    this.log(`This appears to be a critical bug in @kenjiuno/msgreader library`, true);
     return null;
   }
 

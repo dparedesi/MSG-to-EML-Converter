@@ -29,7 +29,7 @@
     "url": "."
   },
   "dependencies": {
-    "@kenjiuno/msgreader": "^1.23.0",
+    "@kenjiuno/msgreader": "^1.22.0",
     "@types/file-saver": "^2.0.7",
     "emailjs-mime-builder": "^2.0.5",
     "file-saver": "^2.0.5",

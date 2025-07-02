@@ -42,11 +42,13 @@ interface MSGData {
   internetMessageId?: string;
   conversationId?: string;
   
-  // Recipients
+  // Recipients - correct structure from analysis
   recipients?: Array<{
     name?: string;
     email?: string;
+    smtpAddress?: string;
     recipientType?: number;
+    recipType?: string; // "to", "cc", "bcc" as strings
     displayName?: string;
     emailAddress?: string;
   }>;
@@ -140,29 +142,58 @@ export class MSGToEMLConverter {
   }
 
   private extractSenderInfo(msgData: MSGData): { name: string; email: string } {
-    // Try multiple sender fields in order of preference
-    let senderName = '';
-    let senderEmail = '';
-
-    // Try various sender name fields
-    senderName = msgData.senderName || msgData.sentByName || msgData.displayFrom || '';
+    // Use correct field names based on actual MSG library structure
+    const senderName = msgData.senderName || msgData.sentByName || msgData.displayFrom || '';
     
-    // Try various sender email fields
-    senderEmail = msgData.senderEmailAddress || msgData.sentByEmailAddress || '';
+    // Try multiple email fields in order of preference
+    let senderEmail = '';
+    
+    // First try inetAcctName which contains SMTP address (e.g., cignac@amazon.it)
+    const inetAcctName = (msgData as unknown as { inetAcctName?: string }).inetAcctName;
+    if (inetAcctName && inetAcctName.includes('@')) {
+      senderEmail = inetAcctName;
+    }
+    
+    // Fallback to senderEmail (Exchange format) if no SMTP address
+    if (!senderEmail) {
+      const exchangeEmail = (msgData as unknown as { senderEmail?: string }).senderEmail;
+      if (exchangeEmail) {
+        // Try to extract SMTP address from Exchange format
+        // Format: /o=Amazon/ou=Exchange Administrative Group (FYDIBOHF23SPDLT)/cn=Recipients/cn=4ba41fcecff04558831e85da596bdd33-cignac
+        const match = exchangeEmail.match(/cn=([^-]+)$/);
+        if (match && inetAcctName) {
+          senderEmail = inetAcctName; // Use inetAcctName if available
+        } else if (match) {
+          // Construct email from username if no inetAcctName
+          senderEmail = `${match[1]}@domain.com`;
+        } else {
+          senderEmail = exchangeEmail; // Use as-is if can't parse
+        }
+      }
+    }
+    
+    // Final fallback to other fields
+    if (!senderEmail) {
+      senderEmail = msgData.senderEmailAddress || msgData.sentByEmailAddress || '';
+    }
 
-    // Parse from combined "from" field if available
+    this.log(`Extracted sender - Name: '${senderName}', Email: '${senderEmail}'`);
+    
+    // Parse from combined "from" field if still no email
     if (!senderEmail && msgData.from) {
       const fromMatch = msgData.from.match(/<([^>]+)>/);
       if (fromMatch) {
-        senderEmail = fromMatch[1];
+        const extractedEmail = fromMatch[1];
         const nameMatch = msgData.from.match(/^([^<]+)</);
-        if (nameMatch && !senderName) {
-          senderName = nameMatch[1].trim().replace(/^["']|["']$/g, '');
-        }
+        const extractedName = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, '') : senderName;
+        this.log(`Parsed from 'from' field - Name: '${extractedName}', Email: '${extractedEmail}'`);
+        return { name: extractedName.trim(), email: extractedEmail.trim() };
       } else if (msgData.from.includes('@')) {
-        senderEmail = msgData.from;
+        this.log(`Using 'from' field as email: '${msgData.from}'`);
+        return { name: senderName.trim(), email: msgData.from.trim() };
       } else {
-        senderName = msgData.from;
+        this.log(`Using 'from' field as name: '${msgData.from}'`);
+        return { name: msgData.from.trim(), email: senderEmail.trim() };
       }
     }
 
@@ -211,40 +242,66 @@ export class MSGToEMLConverter {
     const bccAddresses: string[] = [];
 
     if (!msgData.recipients || !Array.isArray(msgData.recipients)) {
+      this.log('No recipients found in MSG data');
       return { toAddresses, ccAddresses, bccAddresses };
     }
 
+    this.log(`Processing ${msgData.recipients.length} recipients`);
+
     msgData.recipients.forEach((recipient, index) => {
       try {
+        // Use correct field names based on actual MSG library structure
         const name = recipient.name || recipient.displayName || '';
-        const email = recipient.email || recipient.emailAddress || '';
-        const type = recipient.recipientType;
+        const email = recipient.smtpAddress || recipient.email || recipient.emailAddress || '';
+        const type = recipient.recipType || recipient.recipientType;
+
+        this.log(`Recipient ${index}: name='${name}', email='${email}', type='${type}'`);
 
         if (!email && !name) {
           this.log(`Warning: Recipient ${index} has no name or email`, 'warn');
           return;
         }
 
+        // Clean up the name - handle "LastName, FirstName" format properly
+        let cleanName = name.trim();
+        
+        // Remove trailing semicolons but preserve commas that are part of "LastName, FirstName" format
+        if (cleanName.endsWith(';')) {
+          cleanName = cleanName.replace(/;+$/, '').trim();
+        }
+        
+        // Check if this looks like "LastName, FirstName" format and preserve it
+        const namePattern = /^[^,]+,\s*[^,]+$/;
+        if (!namePattern.test(cleanName)) {
+          // If it's not "LastName, FirstName" format, remove trailing commas too
+          cleanName = cleanName.replace(/[,]+$/, '').trim();
+        }
+
         let formattedAddress = '';
         if (email && email.includes('@')) {
-          formattedAddress = name ? `"${name}" <${email}>` : email;
-        } else if (name) {
-          formattedAddress = name;
-          this.log(`Warning: Recipient '${name}' has no valid email address`, 'warn');
+          formattedAddress = cleanName ? `"${cleanName}" <${email}>` : email;
+        } else if (cleanName) {
+          formattedAddress = cleanName;
+          this.log(`Warning: Recipient '${cleanName}' has no valid email address`, 'warn');
         }
 
         if (formattedAddress) {
-          // MAPI recipient types: 1=TO, 2=CC, 3=BCC
-          if (type === 1 || String(type) === '1') {
+          // Handle both string and numeric recipient types
+          // recipType values from analysis: "to", "cc", "bcc" (strings, not numbers)
+          // MAPI recipient types: 1=TO, 2=CC, 3=BCC (numbers)
+          if (type === 'to' || type === 1 || String(type) === '1') {
             toAddresses.push(formattedAddress);
-          } else if (type === 2 || String(type) === '2') {
+            this.log(`Added TO: ${formattedAddress}`);
+          } else if (type === 'cc' || type === 2 || String(type) === '2') {
             ccAddresses.push(formattedAddress);
-          } else if (type === 3 || String(type) === '3') {
+            this.log(`Added CC: ${formattedAddress}`);
+          } else if (type === 'bcc' || type === 3 || String(type) === '3') {
             bccAddresses.push(formattedAddress);
+            this.log(`Added BCC: ${formattedAddress}`);
           } else {
             // Default to TO if type is unclear
             toAddresses.push(formattedAddress);
-            this.log(`Warning: Unknown recipient type '${type}' for '${formattedAddress}', defaulting to TO`, 'warn');
+            this.log(`Added TO (default): ${formattedAddress} (unknown type: ${type})`);
           }
         }
       } catch (error) {
@@ -252,15 +309,19 @@ export class MSGToEMLConverter {
       }
     });
 
+    this.log(`Final recipients - TO: ${toAddresses.length}, CC: ${ccAddresses.length}, BCC: ${bccAddresses.length}`);
     return { toAddresses, ccAddresses, bccAddresses };
   }
 
-  private async buildEMLFromMSG(msgData: MSGData, nestingLevel: number = 0, msgReader?: unknown): Promise<MimeBuilder> {
+  private async buildEMLFromMSG(msgData: MSGData, nestingLevel: number = 0, msgReader?: unknown, rawBuffer?: Uint8Array): Promise<MimeBuilder> {
     const subject = msgData.subject || 'No Subject';
     this.log(`${'  '.repeat(nestingLevel)}Processing MSG (Subject: '${subject}')`);
 
     // Use enhanced attachment handler to extract attachments
     const attachmentHandler = new EnhancedAttachmentHandler();
+    if (rawBuffer) {
+      attachmentHandler.setRawMsgBuffer(rawBuffer);
+    }
     const attachmentResult = await attachmentHandler.extractAttachments(msgData, msgReader);
     
     // Log attachment handler results
@@ -399,7 +460,7 @@ export class MSGToEMLConverter {
       this.log(`Body HTML length: ${msgData.bodyHTML?.length || 0} chars`);
       
       // Build EML from MSG data
-      const emlBuilder = await this.buildEMLFromMSG(msgData, 0, msgReader);
+      const emlBuilder = await this.buildEMLFromMSG(msgData, 0, msgReader, new Uint8Array(arrayBuffer));
       const emlContent = emlBuilder.build();
       
       if (!emlContent || emlContent.length === 0) {
